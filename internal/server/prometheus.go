@@ -15,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/api"
 	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
+	"github.com/prometheus/common/config"
 )
 
 // ThresholdResponse represents the response format for a threshold.
@@ -66,9 +67,31 @@ func NewPrometheusProvider(prometheusConfig *MetricsConfigProvider, logger *zap.
 	return &PrometheusProvider{config: prometheusConfig, logger: logger}
 }
 
+func (pp *PrometheusProvider) getBearerToken() config.SecretReader {
+	if len(pp.config.Provider.BearerToken) > 0 {
+		return config.NewInlineSecret(pp.config.Provider.BearerToken)
+	} else if len(pp.config.Provider.BearerTokenFile) > 0 {
+		return config.NewFileSecret(pp.config.Provider.BearerTokenFile)
+	}
+
+	return nil
+}
+
 func (pp *PrometheusProvider) init() error {
+	var rt http.RoundTripper
+	if token := pp.getBearerToken(); token != nil {
+		rt = config.NewAuthorizationCredentialsRoundTripper(
+			"Bearer",
+			token,
+			api.DefaultRoundTripper,
+		)
+	} else {
+		rt = api.DefaultRoundTripper
+	}
+
 	client, err := api.NewClient(api.Config{
-		Address: pp.config.Provider.Address,
+		Address:      pp.config.Provider.Address,
+		RoundTripper: rt,
 	})
 	if err != nil {
 		pp.logger.Errorf("Error creating client: %v\n", err)
